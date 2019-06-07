@@ -273,7 +273,10 @@ mem_init_mp(void)
 	//     Permissions: kernel RW, user NONE
 	//
 	// LAB 4: Your code here:
-
+	int i;
+	for (i = 0; i < NCPU; i++) {
+		boot_map_region(kern_pgdir, KSTACKTOP - (i+1) * KSTKSIZE - i * KSTKGAP, KSTKSIZE, PADDR(percpu_kstacks[i]), PTE_W);
+	}
 }
 
 // --------------------------------------------------------------
@@ -318,7 +321,7 @@ page_init(void)
 		// the range below is eitehr io mapping kern_pgdir, page info structure
 		// and kernel code , the whole contiguous range are not considered, so 
 		// don't even touch and skip the linking
-		if (i >= npages_basemem && i < pgnum) {
+		if ((i >= npages_basemem && i < pgnum )|| (i == MPENTRY_PADDR/PGSIZE)) {
 			pages[i].pp_ref = 1;
 			continue;
 		}
@@ -460,9 +463,10 @@ boot_map_region(pde_t *pgdir, uintptr_t va, size_t size, physaddr_t pa, int perm
 		if (pte == NULL) {
 			panic("fail to map va:%x -> pa:%x\n!", va, pa);
 		}
-		if (*pte & PTE_P) {
-			panic("remap!");
-		}
+		// don't need to worry about remap since it is only for static mapping
+		// if (*pte & PTE_P) {
+		// 	panic("remap!");
+		// }
 		*pte = pa | PTE_P | perm;
 	}
 }
@@ -603,7 +607,20 @@ mmio_map_region(physaddr_t pa, size_t size)
 	// Hint: The staff solution uses boot_map_region.
 	//
 	// Your code here:
-	panic("mmio_map_region not implemented");
+	// be aware of the pre handling of pa and size
+	// pa : we need to round down, 
+	// size : we need to do as below in case pa round down to lower value , 
+	// but still keep last map paddr up to original pa + size
+	size = pa + size;
+	pa = ROUNDDOWN(pa, PGSIZE);
+	size = ROUNDUP(size - pa, PGSIZE);
+	if (base + size < MMIOBASE || base + size > MMIOLIM) {
+		panic("mmio_map_region: MMIO space overflow! pa + size:%x, MMIOBASE:%x, MMIOLIM:%x\n",
+			base + size, MMIOBASE, MMIOLIM);
+	}
+	boot_map_region(kern_pgdir, base, size, pa, PTE_W | PTE_PCD | PTE_PWT);
+	base += size;
+	return (void*)(base - size);
 }
 
 static uintptr_t user_mem_check_addr;
