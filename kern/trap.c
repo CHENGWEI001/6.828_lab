@@ -120,24 +120,24 @@ trap_init_percpu(void)
 	// LAB 4: Your code here:
 	struct Taskstate *ts_ptr = &(thiscpu->cpu_ts);
 	int i = thiscpu->cpu_id;
-	
+
 	// Setup a TSS so that we get the right stack
 	// when we trap to the kernel.
 	ts_ptr->ts_esp0 = (uintptr_t)(percpu_kstacks[i]) + KSTKSIZE;
 	ts_ptr->ts_ss0 = GD_KD;
 	ts_ptr->ts_iomb = sizeof(struct Taskstate);
-	
+
 	// Initialize the TSS slot of the gdt.
 	gdt[(GD_TSS0 >> 3) + i] = SEG16(STS_T32A, (uint32_t) (ts_ptr),
 					sizeof(struct Taskstate) - 1, 0);
 	gdt[(GD_TSS0 >> 3) + i].sd_s = 0;
-	
+
 	// Load the TSS selector (like other segment selectors, the
 	// bottom three bits are special; we leave them 0)
 	ltr(GD_TSS0 + i*8);
-	
+
 	// Load the IDT
-	lidt(&idt_pd);		
+	lidt(&idt_pd);
 
 }
 
@@ -202,7 +202,7 @@ trap_dispatch(struct Trapframe *tf)
 		case T_SYSCALL:
 			tf->tf_regs.reg_eax = syscall(tf->tf_regs.reg_eax, tf->tf_regs.reg_edx, tf->tf_regs.reg_ecx,
 					tf->tf_regs.reg_ebx, tf->tf_regs.reg_edi, tf->tf_regs.reg_esi);
-			return;	
+			return;
 		default:
 			break;
 	}
@@ -227,6 +227,16 @@ trap_dispatch(struct Trapframe *tf)
 
 	// Handle keyboard and serial interrupts.
 	// LAB 5: Your code here.
+	if (tf->tf_trapno == (IRQ_OFFSET + IRQ_KBD)) {
+		lapic_eoi();
+		kbd_intr();
+		return;
+	}
+	if (tf->tf_trapno == (IRQ_OFFSET + IRQ_SERIAL)) {
+		lapic_eoi();
+		serial_intr();
+		return;
+	}
 
 	// Unexpected trap: The user process or the kernel has a bug.
 	print_trapframe(tf);
@@ -348,14 +358,14 @@ page_fault_handler(struct Trapframe *tf)
 	//   (the 'tf' variable points at 'curenv->env_tf').
 
 	// LAB 4: Your code here.
-	if (curenv->env_pgfault_upcall) {	
+	if (curenv->env_pgfault_upcall) {
 		if (curenv->env_tf.tf_esp >= UXSTACKTOP - PGSIZE && curenv->env_tf.tf_esp < UXSTACKTOP) {
 			utf_addr = curenv->env_tf.tf_esp - sizeof(struct UTrapframe) - 4;
 		} else {
 			utf_addr = UXSTACKTOP - sizeof(struct UTrapframe);
 		}
 		// here check one page range from utf_addr, even for the case where utf_addr
-		// was starting from UXSTACKTOP, it is fine since address below are belong to 
+		// was starting from UXSTACKTOP, it is fine since address below are belong to
 		// USER's own stack address
 		user_mem_assert(curenv, (void*)utf_addr, 1 , PTE_W);
 		utf = (struct UTrapframe*)utf_addr;

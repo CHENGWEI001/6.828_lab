@@ -48,7 +48,14 @@ bc_pgfault(struct UTrapframe *utf)
 	// the disk.
 	//
 	// LAB 5: you code here:
+	addr = (void *)ROUNDDOWN(addr, PGSIZE);
+	if ((r = sys_page_alloc(0, addr, PTE_U | PTE_W | PTE_P)) < 0) {
+		panic("bc_pgfault: sys_page_alloc fail\n");
+	}
 
+	if ((r = ide_read(blockno*BLKSECTS, addr, BLKSECTS)) < 0) {
+		panic("bc_pgfault: ide_read error\n");
+	}
 	// Clear the dirty bit for the disk block page since we just read the
 	// block from disk
 	if ((r = sys_page_map(0, addr, 0, addr, uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0)
@@ -57,6 +64,11 @@ bc_pgfault(struct UTrapframe *utf)
 	// Check that the block we read was allocated. (exercise for
 	// the reader: why do we do this *after* reading the block
 	// in?)
+	// my ans to above question: here pg_fault and bring block into cache is just
+	// because we don't have the vm mapping for that block, but whether that block
+	// is free or not, we don't know yet, here to check and make sure not get an
+	// unallocated block, the point here is we shouldn't try to access a block which
+	// is not being allocated yet
 	if (bitmap && block_is_free(blockno))
 		panic("reading free block %08x\n", blockno);
 }
@@ -72,12 +84,22 @@ void
 flush_block(void *addr)
 {
 	uint32_t blockno = ((uint32_t)addr - DISKMAP) / BLKSIZE;
+	int r;
 
 	if (addr < (void*)DISKMAP || addr >= (void*)(DISKMAP + DISKSIZE))
 		panic("flush_block of bad va %08x", addr);
 
 	// LAB 5: Your code here.
-	panic("flush_block not implemented");
+	if (!va_is_mapped(addr) || !va_is_dirty(addr))
+		return ;
+	addr = (void *)ROUNDDOWN(addr, PGSIZE);
+	if ((r = ide_write(blockno*BLKSECTS, addr, BLKSECTS)) < 0)
+		panic("flush_block: ide_write error: %e\n", r);
+
+	// Clear the dirty bit for the disk block page since we just read the
+	// block from disk
+	if ((r = sys_page_map(0, addr, 0, addr, uvpt[PGNUM(addr)] & PTE_SYSCALL)) < 0)
+		panic("in bc_pgfault, sys_page_map: %e", r);
 }
 
 // Test that the block cache works, by smashing the superblock and

@@ -133,10 +133,23 @@ sys_env_set_status(envid_t envid, int status)
 static int
 sys_env_set_trapframe(envid_t envid, struct Trapframe *tf)
 {
-	// LAB 5: Your code here.
 	// Remember to check whether the user has supplied us with a good
 	// address!
-	panic("sys_env_set_trapframe not implemented");
+    struct Env *e;
+    int ret;
+
+    //if ((void *)tf >= (void *)UTOP)
+    //    return -E_INVAL;
+    assert((void *)tf < (void *)UTOP);
+
+    if ((ret = envid2env(envid, &e, 1)) < 0)
+        return ret;
+
+    tf->tf_cs |= 3;
+    tf->tf_eflags |= FL_IF;
+
+    e->env_tf = *tf;
+    return 0;
 }
 
 // Set the page fault upcall for 'envid' by modifying the corresponding struct
@@ -336,6 +349,7 @@ sys_page_unmap(envid_t envid, void *va)
 //		current environment's address space.
 //	-E_NO_MEM if there's not enough memory to map srcva in envid's
 //		address space.
+
 static int
 sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 {
@@ -351,29 +365,30 @@ sys_ipc_try_send(envid_t envid, uint32_t value, void *srcva, unsigned perm)
 	if (e->env_ipc_recving == 0)
 		return -E_IPC_NOT_RECV;
 
-	pp = page_lookup(curenv->env_pgdir, srcva, &ptep);
+	if (((uint32_t)srcva < UTOP)) {
+		pp = page_lookup(curenv->env_pgdir, srcva, &ptep);
 
-	if (((uint32_t)srcva < UTOP) && (((uint32_t)srcva & 0xFFF) != 0))
-		return -E_INVAL;
+		if (((uint32_t)srcva & 0xFFF) != 0)
+			return -E_INVAL;
 
-	if (((uint32_t)srcva < UTOP) && ((perm | PTE_SYSCALL) != PTE_SYSCALL))
-		return -E_INVAL;
+		if ((perm | PTE_SYSCALL) != PTE_SYSCALL)
+			return -E_INVAL;
 
-	if (((uint32_t)srcva < UTOP) && (pp == NULL))
-		return -E_INVAL;
+		if (pp == NULL)
+			return -E_INVAL;
 
+		if (!((*ptep) & PTE_W) && (perm & PTE_W))
+			return -E_INVAL;
 
-	if (!((*ptep) & PTE_W) && (perm & PTE_W))
-		return -E_INVAL;
-
-	e->env_ipc_perm = 0;
-	if (((uint32_t)srcva < UTOP) && ((uint32_t)e->env_ipc_dstva < UTOP))
-	{
-		if ((r = page_insert(e->env_pgdir, pp, e->env_ipc_dstva, perm)) < 0)
-			return r;
-		e->env_ipc_perm = perm;
-
+		e->env_ipc_perm = 0;
+		if ((uint32_t)e->env_ipc_dstva < UTOP)
+		{
+			if ((r = page_insert(e->env_pgdir, pp, e->env_ipc_dstva, perm)) < 0)
+				return r;
+			e->env_ipc_perm = perm;
+		}
 	}
+
 	e->env_ipc_recving = 0;
 	e->env_ipc_value = value;
 	e->env_ipc_from = curenv->env_id;
@@ -443,6 +458,8 @@ syscall(uint32_t syscallno, uint32_t a1, uint32_t a2, uint32_t a3, uint32_t a4, 
 			return sys_ipc_try_send((envid_t)a1, (uint32_t)a2, (void *)a3, (unsigned)a4);
 		case SYS_ipc_recv:
 			return sys_ipc_recv((void *)a1);
+	    case SYS_env_set_trapframe:
+	        return sys_env_set_trapframe(a1, (void *) a2);
 		default:
 			return -E_INVAL;
 	}

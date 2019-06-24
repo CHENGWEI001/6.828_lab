@@ -21,7 +21,7 @@ pgfault(struct UTrapframe *utf)
 
 	// Check that the faulting access was (1) a write, and (2) to a
 	// copy-on-write page.  If not, panic.
-	// Hint: 
+	// Hint:
 	//   Use the read-only page table mappings at uvpt
 	//   (see <inc/memlayout.h>).
 
@@ -38,7 +38,7 @@ pgfault(struct UTrapframe *utf)
 
 	// LAB 4: Your code here.
 	// cprintf("pgfault: try to map addr:%p, uvpt[PGNUM(addr):%x\n", addr, uvpt[PGNUM(addr)]);
-	
+
 	r = sys_page_alloc(0, (void *)PFTEMP, PTE_U | PTE_W | PTE_P);
 	if (r < 0)
 		panic("pgfault: sys_page_alloc fail\n");
@@ -70,16 +70,21 @@ duppage(envid_t envid, unsigned pn)
 
 	// LAB 4: Your code here.
 	void* addr = (void *)(pn * PGSIZE);
-	if((uvpt[pn] & PTE_COW) || (uvpt[pn] & PTE_W))
+	if (uvpt[pn] & PTE_SHARE)
+	{
+		r = sys_page_map(0, addr, envid, addr, uvpt[pn]&PTE_SYSCALL);
+		if (r < 0)
+			return r;
+	} else if((uvpt[pn] & PTE_COW) || (uvpt[pn] & PTE_W))
 	{
 		r = sys_page_map(0, addr, envid, addr, PTE_COW | PTE_U | PTE_P);
 		if(r < 0)
 			panic("duppage: sys_page_map fail\n");
 		// why we need to mark the page COW for parent as well?
-		// the reason is that for the given COW page , to child, it is read 
-		// only , but if child not write to it instead parent write to it, 
-		// child would see inconsisten result, so here we also need to mark 
-		// the page as COW in parent env as well to let parent to alloc the page 
+		// the reason is that for the given COW page , to child, it is read
+		// only , but if child not write to it instead parent write to it,
+		// child would see inconsisten result, so here we also need to mark
+		// the page as COW in parent env as well to let parent to alloc the page
 		// for the page when trying to write to it
 		r = sys_page_map(0, addr, 0, addr, PTE_COW | PTE_U | PTE_P);
 		if(r < 0)
@@ -139,13 +144,13 @@ fork(void)
 			duppage(envid, PGNUM(addr));
 	// allocate a new page for the child's user exception stack.
 	if((r = sys_page_alloc(envid, (void *)(UXSTACKTOP - PGSIZE), PTE_U | PTE_W | PTE_P)) < 0)
-		panic("sys_page_alloc: %e", r);			
+		panic("sys_page_alloc: %e", r);
 	extern void _pgfault_upcall();
 	sys_env_set_pgfault_upcall(envid, _pgfault_upcall);
 
 	// Start the child environment running
 	if ((r = sys_env_set_status(envid, ENV_RUNNABLE)) < 0)
-		panic("sys_env_set_status: %e", r);		
+		panic("sys_env_set_status: %e", r);
 	return envid;
 }
 
